@@ -6,24 +6,42 @@ on:
       deb:
         description: "Direct URL to deb file"
         required: true
+        type: string
 
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Convert deb to IPA
+      - name: Create workspace dirs
         run: |
-          curl -L -o ${{ github.workspace }}/app.deb "${{ github.event.inputs.deb }}"
-          dpkg-deb -X ${{ github.workspace }}/app.deb ${{ github.workspace }}/app
+          mkdir -p "$GITHUB_WORKSPACE/ipa/Payload"
 
-          mkdir -p ${{ github.workspace }}/ipa/Payload
-          cp -R ${{ github.workspace }}/app/Applications/* ${{ github.workspace }}/ipa/Payload
-          
-          cd ${{ github.workspace }}/ipa
-          zip -r ${{ github.workspace }}/App.ipa .
+      - name: Download DEB
+        run: |
+          curl -L "${{ inputs.deb }}" -o "$GITHUB_WORKSPACE/app.deb"
 
-      - name: Upload IPA
+      - name: Extract DEB (data payload)
+        run: |
+          # -X extracts the data.tar.* payload into target dir
+          dpkg-deb -X "$GITHUB_WORKSPACE/app.deb" "$GITHUB_WORKSPACE/app"
+
+      - name: Validate app bundle exists
+        run: |
+          shopt -s nullglob
+          APP_DIRS=("$GITHUB_WORKSPACE/app/Applications/"*.app)
+          if [ ${#APP_DIRS[@]} -eq 0 ]; then
+            echo "ERROR: No .app found in Applications/ (this DEB is likely a tweak, not an app)."
+            exit 1
+          fi
+
+      - name: Build IPA structure
+        run: |
+          cp -R "$GITHUB_WORKSPACE/app/Applications/"*.app "$GITHUB_WORKSPACE/ipa/Payload/"
+          cd "$GITHUB_WORKSPACE/ipa"
+          # zip the Payload directory into an IPA at the repo root
+          zip -r "$GITHUB_WORKSPACE/App.ipa" Payload
+
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: App
